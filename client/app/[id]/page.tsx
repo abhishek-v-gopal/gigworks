@@ -84,6 +84,57 @@ interface BusinessData {
 export const revalidate = 3600; // Revalidate every hour for fresh content
 export const preferredRegion = 'auto' // Optimize for user's region
 
+function sanitizeText(value?: string | null) {
+  return value?.replace(/<[^>]*>/g, "").replace(/\s+/g, " ").trim() || ""
+}
+
+function getServiceTerms(businessData: BusinessData) {
+  const primaryService = businessData.subCategory?.trim()
+  const additionalServices = businessData.profile.additional_services
+    ? businessData.profile.additional_services
+        .split(",")
+        .map((service) => service.trim())
+        .filter(Boolean)
+    : []
+
+  return [primaryService, ...additionalServices].filter(
+    (term, index, terms) => Boolean(term) && terms.indexOf(term) === index
+  )
+}
+
+function buildSearchPhrases(businessData: BusinessData) {
+  const serviceTerms = getServiceTerms(businessData)
+  const locationTerms = [
+    businessData.profile.city,
+    businessData.profile.state,
+    businessData.profile.country,
+  ].filter(Boolean)
+
+  const basePhrases = [
+    businessData.profile.name,
+    businessData.subCategory,
+    businessData.category,
+    businessData.subCategoryOption,
+    ...serviceTerms,
+    ...locationTerms,
+    "local service provider",
+    "near me",
+  ]
+
+  const serviceLocationPhrases = serviceTerms.flatMap((service) => {
+    const serviceLower = service.toLowerCase()
+    return [
+      `${service} near me`,
+      `${serviceLower} near me`,
+      `${service} in ${businessData.profile.city}`,
+      `${serviceLower} in ${businessData.profile.city}`,
+      `${service} in ${businessData.profile.city}, ${businessData.profile.state}`,
+    ]
+  })
+
+  return Array.from(new Set([...basePhrases, ...serviceLocationPhrases].filter(Boolean)))
+}
+
 // 🎯 DYNAMIC IMPORT FOR CLIENT COMPONENTS
 const BusinessProfileClient = dynamic(() => import("./profile"), {
   loading: () => <PendingPage />,
@@ -169,35 +220,29 @@ function generateJsonLd(businessData: BusinessData, slug: string) {
       })
       .filter(Boolean)
   }
+  const services = getServiceTerms(businessData)
+  const profileDescription = sanitizeText(businessData.profile.description)
+  const pageUrl = `https://gigwork.co.in/${slug}`
+  const locationUrl =
+    businessData.profile.location_url ||
+    `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+      `${businessData.profile.name}, ${businessData.profile.city}, ${businessData.profile.state}`
+    )}`
 
-
-  // Generate services array from additional_services
-  const services = businessData.profile.additional_services
-    ? businessData.profile.additional_services
-        .split(",")
-        .map((service) => service.trim())
-        .filter(Boolean)
-    : []
-
-    
   // Generate social media profiles array
   const sameAs = businessData.profile.socials ? Object.values(businessData.profile.socials).filter(Boolean) : []
 
   const jsonLd = {
     "@context": "https://schema.org",
-    "@type": "LocalBusiness",
-    "@id": `https://gigwork.co.in/${slug}`,
+    "@type": ["LocalBusiness", "ProfessionalService"],
+    "@id": pageUrl,
     name: businessData.profile.name,
     description:
-      businessData.profile.description?.replace(/<[^>]*>/g, "") ||
+      profileDescription ||
       `${businessData.profile.name} - ${businessData.subCategory}`,
-    url: `https://gigwork.co.in/${slug}`,
+    url: pageUrl,
     telephone: `+91${businessData.profile.phone || businessData.user.phone}`,
     email: businessData.profile.email,
-
-    // Business category
-    category: businessData.category,
-    additionalType: businessData.subCategory,
 
     // Address
     address: {
@@ -214,6 +259,22 @@ function generateJsonLd(businessData: BusinessData, slug: string) {
       latitude: businessData.profile.latitude,
       longitude: businessData.profile.longitude,
     },
+
+    hasMap: locationUrl,
+
+    areaServed: [
+      businessData.profile.city,
+      businessData.profile.state,
+      businessData.profile.country,
+    ].filter(Boolean),
+
+    serviceType: services,
+
+    keywords: buildSearchPhrases(businessData),
+
+    knowsAbout: buildSearchPhrases(businessData),
+
+    mainEntityOfPage: pageUrl,
 
     // Images
     image: [
@@ -266,45 +327,24 @@ function generateJsonLd(businessData: BusinessData, slug: string) {
       taxID: businessData.profile.gstin,
     }),
 
-    // Enhanced business information
-    ...(businessData.profile.type && {
-      additionalType: businessData.profile.type,
-    }),
+    additionalType: businessData.profile.type || businessData.subCategory,
 
     // Business hours and availability
     ...(businessData.profile.operating_hours && {
       openingHoursSpecification: formatOperatingHoursForSchema(businessData.profile.operating_hours),
     }),
 
-    // Aggregate rating (placeholder - can be replaced with real data)
-    aggregateRating: {
-      "@type": "AggregateRating",
-      ratingValue: "4.5",
-      reviewCount: "10",
-      bestRating: "5",
-      worstRating: "1",
-    },
-
-    // priceRange: "$$",
-
-    // Business status
-    // isAccessibleForFree: false,
-
-    // Additional properties
-    // foundingDate: "2020",
-    // numberOfEmployees: "1-10",
-
-    // Link to main website
-    isPartOf: {
-      "@id": businessData.profile.socials?.website || `https://gigwork.co.in/${slug}`,
-    },
+    sameAs: [
+      ...(sameAs as string[]),
+      ...(businessData.profile.socials?.website ? [businessData.profile.socials.website] : []),
+    ].filter(Boolean),
   }
 
   return jsonLd
 }
 
 // 🎯 GENERATE METADATA FUNCTION
-export async function generateMetadata({ params }: { params: { id: string }}) {
+export async function generateMetadata({ params }: { params: { id: string } }): Promise<Metadata> {
   try {
     // Get the business slug from params
     const { id } = params
@@ -318,47 +358,27 @@ export async function generateMetadata({ params }: { params: { id: string }}) {
 
     const { data: businessData } = result
     const { profile } = businessData
-
-    // Clean description (remove HTML tags)
-    const cleanDescription =
-      profile.description?.replace(/<[^>]*>/g, "").slice(0, 160) ||
-      `${profile.name} - ${businessData.subCategory} in ${profile.city}, ${profile.state}. Contact: +91${profile.phone || businessData.user.phone}`
-
-    // Generate comprehensive keywords from business data
-    const keywords = [
-      profile.name,
-      businessData.subCategory,
-      businessData.category,
-      profile.city,
-      profile.state,
-      profile.country,
-      ...(profile.additional_services?.split(",").map((s) => s.trim()).filter(Boolean) || []),
-      "business directory",
-      "service provider",
-      "professional services",
-      "local business",
-      "business near me",
-      `${businessData.subCategory} in ${profile.city}`,
-      `${profile.city} ${businessData.subCategory}`,
-      `${profile.state} business directory`,
-      "verified business",
-      "licensed professional",
-    ].join(", ")
+    const pageTitle = `${profile.name} | ${businessData.subCategory} in ${profile.city}, ${profile.state}`
+    const cleanDescription = sanitizeText(profile.description)
+    const metaDescription =
+      cleanDescription.slice(0, 160) ||
+      `${profile.name} is a ${businessData.subCategory} in ${profile.city}, ${profile.state}. Find contact details, services, hours, and location for this local provider near you.`
+    const keywords = buildSearchPhrases(businessData)
 
     return {
       // Dynamic title with business name
-      title: `${profile.name} - ${businessData.subCategory} in ${profile.city}`,
+      title: pageTitle,
 
       // Dynamic description
-      description: cleanDescription,
+      description: metaDescription,
 
       // Dynamic keywords
       keywords: keywords,
 
       // Open Graph for social sharing
       openGraph: {
-        title: `${profile.name} - ${businessData.subCategory}`,
-        description: cleanDescription,
+        title: pageTitle,
+        description: metaDescription,
         type: "website",
         locale: "en_IN",
         url: `https://gigwork.co.in/${id}`,
@@ -384,8 +404,8 @@ export async function generateMetadata({ params }: { params: { id: string }}) {
       // Twitter Card
       twitter: {
         card: "summary_large_image",
-        title: `${profile.name} - ${businessData.subCategory}`,
-        description: cleanDescription,
+        title: pageTitle,
+        description: metaDescription,
         images: [profile.banner ? `${ASSET_BASE_URL}/${profile.banner}` : "https://gigwork.co.in/assets/media/15879.png"],
       },
 
@@ -405,11 +425,6 @@ export async function generateMetadata({ params }: { params: { id: string }}) {
           "max-image-preview": "large",
           "max-snippet": -1,
         },
-        // Additional bot directives
-        bingbot: {
-          index: true,
-          follow: true,
-        },
       },
       
       // Performance hints and additional metadata
@@ -428,12 +443,6 @@ export async function generateMetadata({ params }: { params: { id: string }}) {
       authors: [{ name: profile.name }],
       creator: profile.name,
       publisher: "Gigwork",
-      
-      // Enhanced SEO metadata
-      verification: {
-        google: "your-google-verification-code", // Add your Google verification code
-        yandex: "your-yandex-verification-code", // Add your Yandex verification code
-      },
     }
   } catch (error) {
     console.error("Error in generateMetadata:", error)
