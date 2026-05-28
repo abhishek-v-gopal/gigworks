@@ -24,6 +24,10 @@ interface employ {
   location?: string;
   type?: string;
   slug: string;
+  subCategoryName?: string;
+  subCategoryId?: string;
+  subCategoryOptionId?: string;
+  subCategoryOptionName?: string;
 }
 export const runtime = "edge";
 
@@ -65,6 +69,10 @@ export default function CategoryPage({ params }: CategoryPageProps) {
               "/assets/media/defaultbusiness.png",
             location: business.location,
             type: business.type,
+            subCategoryName: business.subCategoryName,
+            subCategoryId: business.subCategoryId,
+            subCategoryOptionId: business.subCategoryOptionId,
+            subCategoryOptionName: business.subCategoryOptionName
           })) || [];
         setEmploys(validBusinesses);
       } catch (error) {
@@ -171,7 +179,8 @@ export default function CategoryPage({ params }: CategoryPageProps) {
                   <span className="text-center font-bold">{s.title}</span>
                   <div className="text-gray-600">
                     <span>
-                      Mode: {s.type === "both" ? "offline/online" : s.type}
+                      {/* Mode: {s.type === "both" ? "offline/online" : s.type} */}
+                      {s.subCategoryName ? `  ${s.subCategoryName} | ${s.subCategoryOptionName}` : ""}
                     </span>
                   </div>
                   <span className="text-center">
