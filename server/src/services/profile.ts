@@ -210,9 +210,15 @@ export const getProfilesByCategory = async (
           type: profile.type,
           avatar: profile.avatar,
           location: profile.city,
+          subCategoryId: subCategory.id,
+          subCategoryName: subCategory.name,
+          subCategoryOptionId: subCategoryOption.id,
+          subCategoryOptionName: subCategoryOption.name,
         })
         .from(profile)
         .leftJoin(category, sql`${category.id} = ${profile.category_id}`)
+        .leftJoin(subCategory, sql`${subCategory.id} = ${profile.sub_category_id}`)
+        .leftJoin(subCategoryOption, sql`${subCategoryOption.id} = ${profile.sub_category_option_id}`)
         .where(sql.join(conditions, sql` AND `))
         .limit(limit)
         .offset((page - 1) * limit)
