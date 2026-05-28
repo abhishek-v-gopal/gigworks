@@ -46,11 +46,20 @@ import { removeFields } from "../../utils/helpers";
  * @example /api/v1/partner
  **/
 
-router.post("/", async (c) => {
+router.post("/",verifyToken, async (c) => {
   try {
     const data = await c.req.json();
 
     let user: User = await getUserByPhone(data.user.phone);
+
+    if (!user) {
+      user = await createUser({
+        name: data.user.name, 
+        phone: data.user.phone,
+        email: data.user.email,
+        password: data.user.password,
+      });
+    }
 
     let partner: Partner = await createPartner(data.partner, user);
 
